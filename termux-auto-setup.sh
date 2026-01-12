@@ -67,14 +67,26 @@ echo ""
 
 # Step 5: Test relay connection (optional - may fail if relay not available)
 echo -e "${YELLOW}[5/8] Testing relay connection...${NC}"
-if node server.js > /dev/null 2>&1 & 
-then
-    sleep 2
-    pkill -f "node server.js"
+# Start server in background with timeout
+timeout 5 node server.js > /tmp/server-test.log 2>&1 &
+SERVER_PID=$!
+
+# Wait a bit for server to start
+sleep 2
+
+# Try to check if server is running by checking the log or process
+if ps -p $SERVER_PID > /dev/null 2>&1; then
+    # Kill the server process
+    kill $SERVER_PID 2>/dev/null || true
+    # Also kill any other node processes just to be safe
+    pkill -f "node server.js" 2>/dev/null || true
     echo -e "${GREEN}✅ Server test passed${NC}"
 else
     echo -e "${YELLOW}⚠️  Server test skipped (will check after PM2 setup)${NC}"
 fi
+
+# Clean up
+rm -f /tmp/server-test.log
 echo ""
 
 # Step 6: Install PM2 globally
