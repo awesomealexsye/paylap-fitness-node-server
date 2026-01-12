@@ -84,7 +84,26 @@ echo ""
 
 # Step 7: Start server with PM2
 echo -e "${YELLOW}[7/8] Starting server with PM2...${NC}"
-pm2 delete paylap-relay 2>/dev/null || true  # Delete old instance if exists
+
+# Comprehensive cleanup of old processes
+echo "Stopping any existing processes..."
+
+# Stop all PM2 processes
+pm2 delete all 2>/dev/null || true
+
+# Kill any stray node processes on port 3000
+lsof -ti:3000 2>/dev/null | xargs kill -9 2>/dev/null || true
+
+# Kill any node server.js processes
+pkill -f "node server.js" 2>/dev/null || true
+pkill -f "node.*paylap" 2>/dev/null || true
+
+# Clean PM2 logs and cache
+pm2 flush 2>/dev/null || true
+
+echo -e "${GREEN}✅ Old processes cleaned up${NC}"
+
+# Start fresh server with PM2
 pm2 start ecosystem.config.js
 pm2 save
 echo -e "${GREEN}✅ Server started with PM2${NC}"
