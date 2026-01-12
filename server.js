@@ -187,9 +187,123 @@ app.get('/status', async (req, res) => {
 app.get('/config', (req, res) => {
     res.json({
         success: true,
-        config: { device_id: config.device_id, local_ip: config.local_ip, version: config.version || '3.5' },
+        config: {
+            device_id: config.device_id,
+            local_key: config.local_key,  // Added local_key
+            local_ip: config.local_ip,
+            version: config.version || '3.5'
+        },
         server: { port: PORT, unlock_duration: DOOR_UNLOCK_DURATION }
     });
+});
+
+// Update Config Endpoint
+app.put('/config', async (req, res) => {
+    try {
+        const { device_id, local_key, local_ip } = req.body;
+
+        // Validation
+        const errors = [];
+
+        if (device_id !== undefined) {
+            if (typeof device_id !== 'string' || device_id.trim().length === 0) {
+                errors.push('device_id must be a non-empty string');
+            }
+        }
+
+        if (local_key !== undefined) {
+            if (typeof local_key !== 'string' || local_key.trim().length === 0) {
+                errors.push('local_key must be a non-empty string');
+            }
+        }
+
+        if (local_ip !== undefined) {
+            // Validate IP address format
+            const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+            if (typeof local_ip !== 'string' || !ipRegex.test(local_ip)) {
+                errors.push('local_ip must be a valid IP address (e.g., 192.168.0.127)');
+            } else {
+                // Check each octet is 0-255
+                const octets = local_ip.split('.');
+                const invalidOctet = octets.some(octet => parseInt(octet) > 255);
+                if (invalidOctet) {
+                    errors.push('local_ip octets must be between 0 and 255');
+                }
+            }
+        }
+
+        if (errors.length > 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'Validation failed',
+                errors: errors
+            });
+        }
+
+        // Check if at least one field is being updated
+        if (!device_id && !local_key && !local_ip) {
+            return res.status(400).json({
+                success: false,
+                error: 'At least one field (device_id, local_key, or local_ip) must be provided'
+            });
+        }
+
+        // Update config object
+        const oldConfig = { ...config };
+        if (device_id) config.device_id = device_id.trim();
+        if (local_key) config.local_key = local_key.trim();
+        if (local_ip) config.local_ip = local_ip.trim();
+
+        // Save to config.json file
+        const configPath = path.join(__dirname, CONFIG_FILE);
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 4), 'utf8');
+
+        console.log('✅ Configuration updated successfully');
+        console.log('Updated fields:', { device_id, local_key, local_ip });
+
+        // Check if device settings changed - if so, reconnect
+        const deviceChanged = device_id || local_key || local_ip;
+        if (deviceChanged) {
+            console.log('⚠️  Device settings changed - reconnecting to relay...');
+
+            // Disconnect current device
+            try {
+                await device.disconnect();
+            } catch (err) {
+                console.log('Note: Error disconnecting old device (expected if already disconnected)');
+            }
+
+            // Reinitialize device with new config
+            device.device = {
+                id: config.device_id,
+                key: config.local_key,
+                ip: config.local_ip,
+                version: config.version || '3.5'
+            };
+
+            // Reconnect
+            setTimeout(() => connectToRelay(), 1000);
+        }
+
+        res.json({
+            success: true,
+            message: 'Configuration updated successfully',
+            config: {
+                device_id: config.device_id,
+                local_key: '***' + config.local_key.slice(-4), // Mask key for security
+                local_ip: config.local_ip,
+                version: config.version
+            },
+            reconnecting: deviceChanged
+        });
+
+    } catch (error) {
+        console.error('❌ Error updating config:', error.message);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to update configuration: ' + error.message
+        });
+    }
 });
 
 app.get('/health', (req, res) => res.json({ status: 'online', relay_connected: isConnected }));
